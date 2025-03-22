@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized PDF Thumbnails Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.7.107/pdf.min.js"></script>
+    <style>
+        #thumbnail-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .pdf-thumbnail {
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            opacity: 0.3; /* Indicate loading */
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="pdfUpload" accept="application/pdf">
+    <div id="thumbnail-container"></div>
+
+    <script>
+        document.getElementById('pdfUpload').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const fileReader = new FileReader();
+                fileReader.onload = function() {
+                    displayPDFThumbnails(fileReader.result);
+                };
+                fileReader.readAsArrayBuffer(file);
+            }
+        });
+
+        async function displayPDFThumbnails(pdfData) {
+            const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+            const container = document.getElementById('thumbnail-container');
+            container.innerHTML = ''; // Clear previous thumbnails
+            
+            const numPages = pdf.numPages;
+            let observer;
+
+            // Lazy load pages when they are in view
+            function lazyLoadThumbnails(entries) {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const pageNum = parseInt(entry.target.dataset.page);
+                        renderThumbnail(pdf, pageNum);
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }
+
+            observer = new IntersectionObserver(lazyLoadThumbnails, { rootMargin: "100px" });
+
+            // Pre-load the first few pages, then lazy load others
+            const firstBatch = Math.min(5, numPages);
+            const lazyLoadPages = [];
+
+            for (let i = 1; i <= numPages; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.className = 'pdf-thumbnail';
+                canvas.dataset.page = i;
+                container.appendChild(canvas);
+
+                if (i <= firstBatch) {
+                    lazyLoadPages.push(renderThumbnail(pdf, i));
+                } else {
+                    observer.observe(canvas);
+                }
+            }
+
+            // Render the first few pages in parallel for faster initial load
+            await Promise.all(lazyLoadPages);
+        }
+
+        async function renderThumbnail(pdf, pageNum) {
+            const page = await pdf.getPage(pageNum);
+            const scale = 0.009375; // Further reduced to half of the previous size
+            const viewport = page.getViewport({ scale });
+
+            const canvas = document.querySelector(`[data-page="${pageNum}"]`);
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({ canvasContext: context, viewport }).promise;
+            canvas.style.opacity = "1"; // Show when done
+        }
+    </script>
+</body>
+</html>
